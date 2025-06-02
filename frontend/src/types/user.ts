@@ -4,14 +4,14 @@ export interface User {
 }
 
 export const TEST_USERS: User[] = [
-    { id: '1', username: 'Alice' },
-    { id: '2', username: 'Bob' },
-    { id: '3', username: 'Charlie' },
-    { id: '4', username: 'David' },
-    { id: '5', username: 'Eve' },
-    { id: '6', username: 'Frank' },
-    { id: '7', username: 'Grace' },
-    { id: '8', username: 'Henry' },
-    { id: '9', username: 'Ivy' },
-    { id: '10', username: 'Jack' }
+    { id: '123e4567-e89b-12d3-a456-426614174000', username: 'alice' },
+    { id: '223e4567-e89b-12d3-a456-426614174000', username: 'bob' },
+    { id: '323e4567-e89b-12d3-a456-426614174000', username: 'charlie' },
+    { id: '423e4567-e89b-12d3-a456-426614174000', username: 'david' },
+    { id: '523e4567-e89b-12d3-a456-426614174000', username: 'eve' },
+    { id: '623e4567-e89b-12d3-a456-426614174000', username: 'frank' },
+    { id: '723e4567-e89b-12d3-a456-426614174000', username: 'grace' },
+    { id: '823e4567-e89b-12d3-a456-426614174000', username: 'henry' },
+    { id: '923e4567-e89b-12d3-a456-426614174000', username: 'ivy' },
+    { id: 'a23e4567-e89b-12d3-a456-426614174000', username: 'jack' }
 ]; 

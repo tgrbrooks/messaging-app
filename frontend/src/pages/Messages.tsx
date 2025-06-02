@@ -1,13 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { LogoutIcon, DeleteIcon, LeaveIcon, SendIcon, AddIcon } from '../components/Icons';
+import { clearCurrentUser } from '../utils/auth';
+import { useCurrentUser } from '../hooks/useCurrentUser';
 import '../styles/Messages.css';
 
 interface Message {
     id: string;
-    userId: string;
     username: string;
-    content: string;
-    sentAt: string;
+    message: string;
+    sent_at: string;
 }
 
 interface Group {
@@ -17,59 +19,176 @@ interface Group {
 }
 
 export default function Messages() {
+    const navigate = useNavigate();
+    const { user, token } = useCurrentUser();
     const [newGroupName, setNewGroupName] = useState('');
     const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
     const [newMessage, setNewMessage] = useState('');
-    
-    // Mock data - replace with real data from API
-    const currentUser = { id: '1', username: 'User1' };
-    const userGroups: Group[] = [
-        { id: '1', name: 'Group 1', createdBy: '1' },
-        { id: '2', name: 'Group 2', createdBy: '2' },
-        { id: '3', name: 'Group 3', createdBy: '3' },
-    ];
-    const availableGroups: Group[] = [
-        { id: '4', name: 'Group 4', createdBy: '2' },
-        { id: '5', name: 'Group 5', createdBy: '3' },
-    ];
-    const messages: Message[] = [
-        { id: '1', userId: '2', username: 'User2', content: 'Hello, how are you?', sentAt: '10:01am 02-06-2025' },
-        { id: '2', userId: '3', username: 'User3', content: "I'm good", sentAt: '10:04am 02-06-2025' },
-        { id: '3', userId: '1', username: 'User1', content: 'Me too, how are you?', sentAt: '10:06am 02-06-2025' },
-    ];
+    const [userGroups, setUserGroups] = useState<Group[]>([]);
+    const [availableGroups, setAvailableGroups] = useState<Group[]>([]);
+    const [messages, setMessages] = useState<Message[]>([]);
+
+    useEffect(() => {
+        if (!user || !token) {
+            navigate('/login');
+            return;
+        }
+
+        // Fetch user's groups
+        fetch('/api/rpc/get_user_groups', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ p_user_id: user!.id })
+        })
+        .then(res => res.json())
+        .then(data => setUserGroups(data));
+
+        // Fetch available groups
+        fetch('/api/groups', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        })
+        .then(res => res.json())
+        .then(data => {
+            const available = data.filter((group: Group) => 
+                !userGroups.some(userGroup => userGroup.id === group.id)
+            );
+            setAvailableGroups(available);
+        });
+    }, [user, token, navigate]);
+
+    useEffect(() => {
+        if (selectedGroup && token) {
+            // Fetch messages for selected group
+            fetch(`/api/rpc/get_group_messages`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ p_group_id: selectedGroup.id })
+            })
+            .then(res => res.json())
+            .then(data => setMessages(data));
+        }
+    }, [selectedGroup, token]);
 
     const handleCreateGroup = () => {
-        if (newGroupName.trim()) {
-            // API call to create group
-            setNewGroupName('');
+        if (newGroupName.trim() && token) {
+            fetch('/api/rpc/create_group', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ p_name: newGroupName })
+            })
+            .then(res => res.json())
+            .then(data => {
+                setUserGroups([...userGroups, data]);
+                setNewGroupName('');
+            });
         }
     };
 
     const handleJoinGroup = (groupId: string) => {
-        // API call to join group
+        if (token) {
+            fetch('/api/rpc/join_group', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ p_group_id: groupId })
+            })
+            .then(() => {
+                const group = availableGroups.find(g => g.id === groupId);
+                if (group) {
+                    setUserGroups([...userGroups, group]);
+                    setAvailableGroups(availableGroups.filter(g => g.id !== groupId));
+                }
+            });
+        }
     };
 
     const handleLeaveGroup = (groupId: string) => {
-        // API call to leave group
+        if (token) {
+            fetch('/api/rpc/leave_group', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ p_group_id: groupId })
+            })
+            .then(() => {
+                const group = userGroups.find(g => g.id === groupId);
+                if (group) {
+                    setUserGroups(userGroups.filter(g => g.id !== groupId));
+                    setAvailableGroups([...availableGroups, group]);
+                }
+                if (selectedGroup?.id === groupId) {
+                    setSelectedGroup(null);
+                }
+            });
+        }
     };
 
     const handleDeleteGroup = (groupId: string) => {
-        // API call to delete group
+        if (token) {
+            fetch(`/api/groups?id=eq.${groupId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            })
+            .then(() => {
+                setUserGroups(userGroups.filter(g => g.id !== groupId));
+                if (selectedGroup?.id === groupId) {
+                    setSelectedGroup(null);
+                }
+            });
+        }
     };
 
     const handleSendMessage = () => {
-        if (newMessage.trim() && selectedGroup) {
-            // API call to send message
-            setNewMessage('');
+        if (newMessage.trim() && selectedGroup && token) {
+            fetch('/api/rpc/create_message', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    p_group_id: selectedGroup.id,
+                    p_message: newMessage
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                setMessages([...messages, data]);
+                setNewMessage('');
+            });
         }
     };
+
+    const handleLogout = () => {
+        clearCurrentUser();
+        navigate('/login');
+    };
+
+    if (!user || !token) return null;
 
     return (
         <div className="messages-container">
             <div className="sidebar">
                 <div className="user-header">
-                    <span>{currentUser.username}</span>
-                    <button className="icon-button">
+                    <span>{user.username}</span>
+                    <button className="icon-button" onClick={handleLogout}>
                         <LogoutIcon />
                     </button>
                 </div>
@@ -112,12 +231,12 @@ export default function Messages() {
                                 className="icon-button"
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    group.createdBy === currentUser.id
+                                    group.createdBy === user.id
                                         ? handleDeleteGroup(group.id)
                                         : handleLeaveGroup(group.id);
                                 }}
                             >
-                                {group.createdBy === currentUser.id ? <DeleteIcon /> : <LeaveIcon />}
+                                {group.createdBy === user.id ? <DeleteIcon /> : <LeaveIcon />}
                             </button>
                         </div>
                     ))}
@@ -139,14 +258,14 @@ export default function Messages() {
                             {messages.map(message => (
                                 <div
                                     key={message.id}
-                                    className={`message ${message.userId === currentUser.id ? 'sent' : 'received'}`}
+                                    className={`message ${message.username === user.username ? 'sent' : 'received'}`}
                                 >
                                     <div className="message-content">
                                         <div className="message-header">
                                             <span className="username">{message.username}</span>
-                                            <span className="timestamp">Sent at: {message.sentAt}</span>
+                                            <span className="timestamp">Sent at: {message.sent_at}</span>
                                         </div>
-                                        <p className="message-body">{message.content}</p>
+                                        <p className="message-body">{message.message}</p>
                                     </div>
                                 </div>
                             ))}
@@ -158,7 +277,7 @@ export default function Messages() {
                                 placeholder="Message..."
                                 value={newMessage}
                                 onChange={(e) => setNewMessage(e.target.value)}
-                                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
                             />
                             <button className="icon-button" onClick={handleSendMessage}>
                                 <SendIcon />

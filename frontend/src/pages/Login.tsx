@@ -1,20 +1,17 @@
-import { useState } from 'react';
-import { TEST_USERS, User } from '../types/user';
+import { TEST_USERS } from '../types/user';
+import { setCurrentUser, getCurrentUser } from '../utils/auth';
 import '../styles/Login.css';
+import { useNavigate } from 'react-router-dom';
 
-interface LoginProps {
-    onLogin: () => void;
-}
-
-export default function Login({ onLogin }: LoginProps) {
-    const [selectedUser, setSelectedUser] = useState<User | null>(null);
+export default function Login() {
+    const navigate = useNavigate();
 
     const handleUserSelect = (event: React.ChangeEvent<HTMLSelectElement>) => {
         const userId = event.target.value;
         const user = TEST_USERS.find(u => u.id === userId) || null;
-        setSelectedUser(user);
         if (user) {
-            onLogin();
+            setCurrentUser(user);
+            navigate('/messages');
         }
     };
 
@@ -24,7 +21,7 @@ export default function Login({ onLogin }: LoginProps) {
                 <h1>Login</h1>
                 <div className="select-wrapper">
                     <select 
-                        value={selectedUser?.id || ''} 
+                        value={getCurrentUser()?.id || ''} 
                         onChange={handleUserSelect}
                         className="user-select"
                     >
