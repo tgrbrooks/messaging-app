@@ -1,4 +1,7 @@
-import { User } from '../types/user';
+import User from '../types/user';
+import { MessageDB } from './db';
+
+const db = new MessageDB();
 
 // Pre-generated tokens for test users
 const TEST_TOKENS: { [key: string]: string } = {
@@ -31,6 +34,12 @@ export function setCurrentUser(user: User) {
     localStorage.setItem('user', JSON.stringify(user));
 }
 
-export function clearCurrentUser() {
+export async function clearCurrentUser() {
     localStorage.removeItem('user');
+    try {
+        await db.init();
+        await db.clear();
+    } catch (error) {
+        console.error('Error clearing IndexedDB:', error);
+    }
 }

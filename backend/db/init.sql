@@ -112,7 +112,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- Function to create a group
 CREATE OR REPLACE FUNCTION create_group(
     p_name VARCHAR,
-    p_id UUID DEFAULT uuid_generate_v4(),
+    p_id UUID,
     p_created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 )
 RETURNS groups AS $$
@@ -152,6 +152,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Function to create a message
 CREATE OR REPLACE FUNCTION create_message(
+    p_id UUID,
     p_group_id UUID,
     p_message VARCHAR,
     p_sent_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -169,8 +170,8 @@ BEGIN
         RAISE EXCEPTION 'User is not a member of this group';
     END IF;
 
-    INSERT INTO messages (group_id, message, sent_by, sent_at, saved_at)
-    VALUES (p_group_id, p_message, v_user_id, p_sent_at, now())
+    INSERT INTO messages (id, group_id, message, sent_by, sent_at, saved_at)
+    VALUES (p_id, p_group_id, p_message, v_user_id, p_sent_at, now())
     RETURNING * INTO v_message;
 
     RETURN v_message;
@@ -179,10 +180,10 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Function to get group messages
 CREATE OR REPLACE FUNCTION get_group_messages(p_group_id UUID)
-RETURNS TABLE (id UUID, message VARCHAR, username VARCHAR, sent_at TIMESTAMPTZ) AS $$
+RETURNS TABLE (id UUID, message VARCHAR, username VARCHAR, sent_at TIMESTAMPTZ, group_id UUID) AS $$
 BEGIN
     RETURN QUERY
-    SELECT m.id, m.message, u.username, m.sent_at
+    SELECT m.id, m.message, u.username, m.sent_at, m.group_id
     FROM messages m
     LEFT JOIN users u ON m.sent_by = u.id
     WHERE m.group_id = p_group_id;
@@ -195,7 +196,7 @@ GRANT EXECUTE ON FUNCTION join_group(UUID) TO app_user;
 GRANT EXECUTE ON FUNCTION leave_group(UUID) TO app_user;
 GRANT EXECUTE ON FUNCTION create_group(VARCHAR, UUID, TIMESTAMPTZ) TO app_user;
 GRANT EXECUTE ON FUNCTION get_user_groups(UUID) TO app_user;
-GRANT EXECUTE ON FUNCTION create_message(UUID, VARCHAR, TIMESTAMPTZ) TO app_user;
+GRANT EXECUTE ON FUNCTION create_message(UUID, UUID, VARCHAR, TIMESTAMPTZ) TO app_user;
 
 -- Grant table permissions to app user
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;

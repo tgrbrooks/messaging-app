@@ -3,24 +3,25 @@ import { useNavigate } from 'react-router-dom';
 import { LogoutIcon, DeleteIcon, LeaveIcon, SendIcon, AddIcon } from '../components/Icons';
 import { clearCurrentUser } from '../utils/auth';
 import { useCurrentUser } from '../hooks/useCurrentUser';
+import { MessageDB } from '../utils/db';
+import { useNetwork } from '../context/NetworkContext';
+import { useFetch } from '../hooks/useFetch';
+import Group from '../types/group';
+import Message from '../types/message';
+import { formatTimestamp } from '../utils/dateFormat';
+import ToggleSwitch from '../components/ToggleSwitch';
 import '../styles/Messages.css';
 
-interface Message {
-    id: string;
-    username: string;
-    message: string;
-    sent_at: string;
-}
+const db = new MessageDB();
 
-interface Group {
-    id: string;
-    name: string;
-    createdBy: string;
-}
+const POLL_INTERVAL = 5000; // 5 seconds
 
 export default function Messages() {
     const navigate = useNavigate();
     const { user, token } = useCurrentUser();
+    const { isOnline, toggleOnline } = useNetwork();
+    const { fetch: networkFetch } = useFetch();
+    const [dbInitialized, setDbInitialized] = useState(false);
     const [newGroupName, setNewGroupName] = useState('');
     const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
     const [newMessage, setNewMessage] = useState('');
@@ -28,14 +29,34 @@ export default function Messages() {
     const [availableGroups, setAvailableGroups] = useState<Group[]>([]);
     const [messages, setMessages] = useState<Message[]>([]);
 
+    // Initialize IndexedDB
+    useEffect(() => {
+        db.init()
+            .then(() => setDbInitialized(true))
+            .catch(console.error);
+    }, []);
+
     useEffect(() => {
         if (!user || !token) {
             navigate('/login');
             return;
         }
 
-        // Fetch user's groups
-        fetch('/api/rpc/get_user_groups', {
+        if (!dbInitialized) {
+            return;
+        }
+
+        // Try to load groups from cache first
+        db.getGroups()
+            .then(cachedGroups => {
+                if (cachedGroups.length > 0) {
+                    setUserGroups(cachedGroups);
+                }
+            })
+            .catch(console.error);
+
+        // Fetch user's groups from server
+        networkFetch('/api/rpc/get_user_groups', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`,
@@ -43,141 +64,259 @@ export default function Messages() {
             },
             body: JSON.stringify({ p_user_id: user!.id })
         })
-        .then(res => res.json())
-        .then(data => setUserGroups(data));
+            .then(res => res.json())
+            .then(data => {
+                setUserGroups(data);
+                // Update cache
+                db.setGroups(data).catch(console.error);
+            })
+            .catch(error => {
+                console.error('Error fetching groups:', error);
+            });
 
         // Fetch available groups
-        fetch('/api/groups', {
+        networkFetch('/api/groups', {
             headers: {
                 'Authorization': `Bearer ${token}`
             }
         })
-        .then(res => res.json())
-        .then(data => {
-            const available = data.filter((group: Group) => 
-                !userGroups.some(userGroup => userGroup.id === group.id)
-            );
-            setAvailableGroups(available);
-        });
-    }, [user, token, navigate]);
+            .then(res => res.json())
+            .then(data => {
+                const available = data.filter((group: Group) =>
+                    !userGroups.some(userGroup => userGroup.id === group.id)
+                );
+                setAvailableGroups(available);
+            })
+            .catch(error => {
+                console.error('Error fetching available groups:', error);
+            });
+    }, [user, token, navigate, networkFetch, dbInitialized]);
 
     useEffect(() => {
-        if (selectedGroup && token) {
-            // Fetch messages for selected group
-            fetch(`/api/rpc/get_group_messages`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ p_group_id: selectedGroup.id })
-            })
-            .then(res => res.json())
-            .then(data => setMessages(data));
+        if (!selectedGroup || !token || !dbInitialized) {
+            return;
         }
-    }, [selectedGroup, token]);
+
+        // Try to load messages from cache first
+        db.getMessages(selectedGroup.id)
+            .then(cachedMessages => {
+                setMessages(cachedMessages);
+            })
+            .catch(console.error);
+
+        // Fetch messages from server
+        networkFetch(`/api/rpc/get_group_messages`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ p_group_id: selectedGroup.id })
+        })
+            .then(res => res.json())
+            .then(data => {
+                setMessages(data);
+                // Update cache
+                db.setMessages(selectedGroup.id, data).catch(console.error);
+            })
+            .catch(error => {
+                console.error('Error fetching messages:', error);
+            });
+    }, [selectedGroup, token, networkFetch, dbInitialized]);
+
+    // Poll for new messages in selected group
+    useEffect(() => {
+        if (!token || !isOnline || !selectedGroup) return;
+
+        const pollMessages = async () => {
+            try {
+                const response = await networkFetch(`/api/rpc/get_group_messages`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ p_group_id: selectedGroup.id })
+                });
+                
+                const newMessages = await response.json();
+                setMessages(newMessages);
+                // Update cache
+                await db.setMessages(selectedGroup.id, newMessages);
+            } catch (error) {
+                console.error('Error polling messages:', error);
+            }
+        };
+
+        // Initial poll
+        pollMessages();
+
+        // Set up polling interval
+        const intervalId = setInterval(pollMessages, POLL_INTERVAL);
+
+        // Cleanup
+        return () => clearInterval(intervalId);
+    }, [token, isOnline, selectedGroup, networkFetch]);
 
     const handleCreateGroup = () => {
         if (newGroupName.trim() && token) {
-            fetch('/api/rpc/create_group', {
+            const id = crypto.randomUUID();
+            const createdAt = new Date().toISOString();
+            networkFetch('/api/rpc/create_group', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ p_name: newGroupName })
+                body: JSON.stringify({ p_id: id, p_name: newGroupName, p_created_at: createdAt }),
+                storeUnsent: true,
+                offlineResponse: {
+                        id,
+                        name: newGroupName,
+                        created_by: user?.id || '',
+                        created_at: createdAt
+                    }
             })
-            .then(res => res.json())
-            .then(data => {
-                setUserGroups([...userGroups, data]);
-                setNewGroupName('');
-            });
+                .then(res => res.json())
+                .then(data => {
+                    const updatedGroups = [...userGroups, data];
+                    setUserGroups(updatedGroups);
+                    // Update cache
+                    db.setGroups(updatedGroups).catch(console.error);
+                    setNewGroupName('');
+                })
+                .catch(error => {
+                    console.error('Error creating group:', error);
+                });
         }
     };
 
     const handleJoinGroup = (groupId: string) => {
         if (token) {
-            fetch('/api/rpc/join_group', {
+            networkFetch('/api/rpc/join_group', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ p_group_id: groupId })
+                body: JSON.stringify({ p_group_id: groupId }),
+                storeUnsent: true,
             })
-            .then(() => {
-                const group = availableGroups.find(g => g.id === groupId);
-                if (group) {
-                    setUserGroups([...userGroups, group]);
-                    setAvailableGroups(availableGroups.filter(g => g.id !== groupId));
-                }
-            });
+                .then(() => {
+                    const group = availableGroups.find(g => g.id === groupId);
+                    if (group) {
+                        const updatedGroups = [...userGroups, group];
+                        setUserGroups(updatedGroups);
+                        setAvailableGroups(availableGroups.filter(g => g.id !== groupId));
+                        // Update cache
+                        db.setGroups(updatedGroups).catch(console.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error joining group:', error);
+                });
         }
     };
 
     const handleLeaveGroup = (groupId: string) => {
         if (token) {
-            fetch('/api/rpc/leave_group', {
+            networkFetch('/api/rpc/leave_group', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ p_group_id: groupId })
+                body: JSON.stringify({ p_group_id: groupId }),
+                storeUnsent: true,
             })
-            .then(() => {
-                const group = userGroups.find(g => g.id === groupId);
-                if (group) {
-                    setUserGroups(userGroups.filter(g => g.id !== groupId));
-                    setAvailableGroups([...availableGroups, group]);
-                }
-                if (selectedGroup?.id === groupId) {
-                    setSelectedGroup(null);
-                }
-            });
+                .then(() => {
+                    const group = userGroups.find(g => g.id === groupId);
+                    if (group) {
+                        const updatedGroups = userGroups.filter(g => g.id !== groupId);
+                        setUserGroups(updatedGroups);
+                        setAvailableGroups([...availableGroups, group]);
+                        // Update cache
+                        db.setGroups(updatedGroups).catch(console.error);
+                        // Delete group and its messages from cache
+                        db.deleteGroup(groupId).catch(console.error);
+                    }
+                    if (selectedGroup?.id === groupId) {
+                        setSelectedGroup(null);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error leaving group:', error);
+                });
         }
     };
 
     const handleDeleteGroup = (groupId: string) => {
         if (token) {
-            fetch(`/api/groups?id=eq.${groupId}`, {
+            networkFetch(`/api/groups?id=eq.${groupId}`, {
                 method: 'DELETE',
                 headers: {
                     'Authorization': `Bearer ${token}`
-                }
+                },
+                storeUnsent: true,
             })
-            .then(() => {
-                setUserGroups(userGroups.filter(g => g.id !== groupId));
-                if (selectedGroup?.id === groupId) {
-                    setSelectedGroup(null);
-                }
-            });
+                .then(() => {
+                    const updatedGroups = userGroups.filter(g => g.id !== groupId);
+                    setUserGroups(updatedGroups);
+                    // Update cache
+                    db.setGroups(updatedGroups).catch(console.error);
+                    // Delete group and its messages from cache
+                    db.deleteGroup(groupId).catch(console.error);
+                    if (selectedGroup?.id === groupId) {
+                        setSelectedGroup(null);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error deleting group:', error);
+                });
         }
     };
 
     const handleSendMessage = () => {
         if (newMessage.trim() && selectedGroup && token) {
-            fetch('/api/rpc/create_message', {
+            const id = crypto.randomUUID();
+            const sentAt = new Date().toISOString();
+            networkFetch('/api/rpc/create_message', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
+                    p_id: id,
                     p_group_id: selectedGroup.id,
-                    p_message: newMessage
-                })
+                    p_message: newMessage,
+                    p_sent_at: sentAt
+                }),
+                storeUnsent: true,
+                offlineResponse: {
+                        id,
+                        group_id: selectedGroup.id,
+                        message: newMessage,
+                        sent_at: sentAt
+                }
             })
-            .then(res => res.json())
-            .then(data => {
-                setMessages([...messages, data]);
-                setNewMessage('');
-            });
+                .then(res => res.json())
+                .then(data => {
+                    const updatedMessages = [...messages, { ...data, username: user?.username }];
+                    setMessages(updatedMessages);
+                    // Update cache
+                    db.setMessages(selectedGroup.id, updatedMessages).catch(console.error);
+                    setNewMessage('');
+                })
+                .catch(error => {
+                    console.error('Error sending message:', error);
+                    setNewMessage('');
+                });
         }
     };
 
-    const handleLogout = () => {
-        clearCurrentUser();
+    const handleLogout = async () => {
+        await clearCurrentUser();
         navigate('/login');
     };
 
@@ -220,7 +359,7 @@ export default function Messages() {
 
                 <div className="groups-list">
                     <h2>Your groups</h2>
-                    {userGroups.map(group => (
+                    {userGroups.sort((a, b) => a.name.localeCompare(b.name)).map(group => (
                         <div
                             key={group.id}
                             className={`group-item ${selectedGroup?.id === group.id ? 'selected' : ''}`}
@@ -231,12 +370,12 @@ export default function Messages() {
                                 className="icon-button"
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    group.createdBy === user.id
+                                    group.created_by === user.id
                                         ? handleDeleteGroup(group.id)
                                         : handleLeaveGroup(group.id);
                                 }}
                             >
-                                {group.createdBy === user.id ? <DeleteIcon /> : <LeaveIcon />}
+                                {group.created_by === user.id ? <DeleteIcon /> : <LeaveIcon />}
                             </button>
                         </div>
                     ))}
@@ -244,18 +383,22 @@ export default function Messages() {
             </div>
 
             <div className="chat-area">
+                <div className="chat-header">
+                    <h2>{selectedGroup?.name}</h2>
+                    <div className="online-status">
+                        <ToggleSwitch
+                            isOn={isOnline}
+                            onToggle={toggleOnline}
+                            label="Network"
+                        />
+                    </div>
+                </div>
                 {selectedGroup ? (
                     <>
-                        <div className="chat-header">
-                            <h2>{selectedGroup.name}</h2>
-                            <div className="online-status">
-                                <span>Online</span>
-                                <div className="status-indicator online"></div>
-                            </div>
-                        </div>
-
                         <div className="messages-list">
-                            {messages.map(message => (
+                            {messages
+                            .sort((a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime())
+                            .map(message => (
                                 <div
                                     key={message.id}
                                     className={`message ${message.username === user.username ? 'sent' : 'received'}`}
@@ -263,12 +406,19 @@ export default function Messages() {
                                     <div className="message-content">
                                         <div className="message-header">
                                             <span className="username">{message.username}</span>
-                                            <span className="timestamp">Sent at: {message.sent_at}</span>
+                                            <span className="timestamp">
+                                                {formatTimestamp(message.sent_at)}
+                                            </span>
                                         </div>
                                         <p className="message-body">{message.message}</p>
                                     </div>
                                 </div>
                             ))}
+                            {!isOnline && (
+                                <div className="offline-message">
+                                    <p>You are offline. New messages may appear when you are back online.</p>
+                                </div>
+                            )}
                         </div>
 
                         <div className="message-input">
