@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import Home from './pages/Home'
+import Login from './pages/Login'
 
 function App() {
   const [health, setHealth] = useState<{ status: string; timestamp: string } | null>(null)
@@ -22,7 +23,9 @@ function App() {
   return (
     <div className="app">
       <Routes>
-        <Route path="/" element={<Home health={health} />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/home" element={<Home health={health} />} />
+        <Route path="/" element={<Navigate to="/login" replace />} />
       </Routes>
     </div>
   )
