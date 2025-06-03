@@ -20,8 +20,8 @@ export default function Login() {
             <div className="login-card">
                 <h1>Login</h1>
                 <div className="select-wrapper">
-                    <select 
-                        value={getCurrentUser()?.id || ''} 
+                    <select
+                        value={getCurrentUser()?.id || ''}
                         onChange={handleUserSelect}
                         className="user-select"
                     >

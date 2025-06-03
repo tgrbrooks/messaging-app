@@ -14,6 +14,7 @@ export function NetworkProvider({ children }: { children: React.ReactNode }) {
         const newState = !isOnline;
         setIsOnline(newState);
 
+        // Manually trigger the service worker to simulate coming back online
         if (newState && 'serviceWorker' in navigator && navigator.serviceWorker.controller) {
             try {
                 const registration = await navigator.serviceWorker.ready;

@@ -24,7 +24,6 @@ export function getAuthToken(): string | null {
 }
 
 export function getCurrentUser(): User | null {
-    // Get user from local storage
     const user = localStorage.getItem('user');
     if (!user) return null;
     return JSON.parse(user);

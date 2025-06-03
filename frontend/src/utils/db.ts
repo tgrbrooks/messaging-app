@@ -1,17 +1,9 @@
 import Message from '../types/message';
 import Group from '../types/group';
+import { UnsentRequest } from '../types/unsent-request';
 
 const DB_NAME = 'messaging_app';
 const DB_VERSION = 1;
-
-export interface UnsentRequest {
-    id?: number;  // Auto-incremented
-    url: string;
-    method: string;
-    headers: { [key: string]: string };
-    body?: string;
-    timestamp: number;
-}
 
 export class MessageDB {
     private db: IDBDatabase | null = null;
@@ -28,7 +20,7 @@ export class MessageDB {
 
             request.onupgradeneeded = (event) => {
                 const db = (event.target as IDBOpenDBRequest).result;
-                
+
                 // Create stores if they don't exist
                 if (!db.objectStoreNames.contains('groups')) {
                     db.createObjectStore('groups', { keyPath: 'id' });
@@ -38,9 +30,9 @@ export class MessageDB {
                     messagesStore.createIndex('groupId', 'group_id', { unique: false });
                 }
                 if (!db.objectStoreNames.contains('unsent_requests')) {
-                    const unsentStore = db.createObjectStore('unsent_requests', { 
-                        keyPath: 'id', 
-                        autoIncrement: true 
+                    const unsentStore = db.createObjectStore('unsent_requests', {
+                        keyPath: 'id',
+                        autoIncrement: true
                     });
                     unsentStore.createIndex('timestamp', 'timestamp', { unique: false });
                 }
@@ -57,9 +49,9 @@ export class MessageDB {
 
             const transaction = this.db.transaction(['unsent_requests'], 'readwrite');
             const store = transaction.objectStore('unsent_requests');
-            
+
             const req = store.add(request);
-            
+
             req.onerror = () => reject(req.error);
             transaction.oncomplete = () => resolve();
         });

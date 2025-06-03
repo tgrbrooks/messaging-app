@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { useNetwork } from '../context/NetworkContext';
-import { MessageDB, UnsentRequest } from '../utils/db';
+import { MessageDB } from '../utils/db';
+import { UnsentRequest } from '../types/unsent-request';
 
 const db = new MessageDB();
 

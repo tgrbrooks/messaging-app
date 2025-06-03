@@ -1,27 +1,22 @@
 const DB_NAME = 'messaging_app';
 const DB_VERSION = 1;
 const MAX_RETRIES = 5;
+const MAX_BACKOFF_DELAY = 30000;
 const CACHE_NAME = 'messaging-app-v1';
 
-// Service Worker Installation
 self.addEventListener('install', (event) => {
-    console.log('Service Worker installing...');
     event.waitUntil(
         Promise.resolve()
             .then(() => {
-                console.log('Service Worker installed');
                 self.skipWaiting(); // Activate worker immediately
             })
     );
 });
 
-// Service Worker Activation
 self.addEventListener('activate', (event) => {
-    console.log('Service Worker activating...');
     event.waitUntil(
         Promise.resolve()
             .then(() => {
-                console.log('Service Worker activated');
                 return self.clients.claim(); // Take control of all clients
             })
     );
@@ -50,7 +45,6 @@ async function getUnsentRequests() {
     });
 }
 
-// Remove a request from the queue
 async function removeRequest(id) {
     const db = await openDB();
     return new Promise((resolve, reject) => {
@@ -63,12 +57,10 @@ async function removeRequest(id) {
     });
 }
 
-// Calculate delay for exponential backoff
 function getBackoffDelay(retryCount) {
-    return Math.min(1000 * Math.pow(2, retryCount), 30000); // Cap at 30 seconds
+    return Math.min(1000 * Math.pow(2, retryCount), MAX_BACKOFF_DELAY);
 }
 
-// Process a single request with retries
 async function processRequest(request, retryCount = 0) {
     try {
         const response = await fetch(request.url, {
@@ -104,13 +96,11 @@ async function processRequest(request, retryCount = 0) {
     }
 }
 
-// Process all unsent requests
 async function processUnsentRequests() {
     try {
         const requests = await getUnsentRequests();
         if (requests.length === 0) return;
 
-        // Process requests in order
         for (const request of requests) {
             await processRequest(request);
         }
@@ -119,13 +109,11 @@ async function processUnsentRequests() {
     }
 }
 
-// Listen for online events
 self.addEventListener('online', () => {
     console.log('Online event received');
     processUnsentRequests();
 });
 
-// Listen for sync events
 self.addEventListener('sync', (event) => {
     if (event.tag === 'process-unsent-requests') {
         event.waitUntil(processUnsentRequests());

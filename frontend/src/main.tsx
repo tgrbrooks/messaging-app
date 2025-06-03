@@ -4,7 +4,6 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import './index.css'
 
-// Register service worker
 async function registerServiceWorker() {
     if ('serviceWorker' in navigator) {
         try {
@@ -14,7 +13,6 @@ async function registerServiceWorker() {
             
             console.log('Service Worker registration successful with scope:', registration.scope);
 
-            // Request a sync when online
             if (navigator.onLine && 'sync' in registration) {
                 try {
                     await (registration as any).sync.register('process-unsent-requests');
@@ -24,12 +22,10 @@ async function registerServiceWorker() {
                 }
             }
 
-            // Listen for controlling service worker changes
             navigator.serviceWorker.addEventListener('controllerchange', () => {
                 console.log('Service Worker controller changed');
             });
 
-            // Listen for service worker state changes
             registration.addEventListener('statechange', () => {
                 console.log('Service Worker state changed:', registration.active?.state);
             });
@@ -42,7 +38,6 @@ async function registerServiceWorker() {
     }
 }
 
-// Register service worker when the window loads
 window.addEventListener('load', registerServiceWorker);
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
